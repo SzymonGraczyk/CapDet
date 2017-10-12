@@ -1,12 +1,16 @@
 import time
 import zmq
 
+from multiprocessing import Value
+
 from zmq.eventloop.ioloop import IOLoop, PeriodicCallback
 from zmq.eventloop.zmqstream import ZMQStream
 from zmq import ZMQError
 
 from logger.capdet_logger import CapDetLogger
 from cthread import CThread
+
+from heartbeat import Heartbeat
 
 log = CapDetLogger()
 
@@ -39,7 +43,7 @@ class BinaryStar(object):
         # initialize the Binary Star
         self.ctx = zmq.Context()  # Our private context
         self.loop = IOLoop.instance()  # Reactor loop
-        self.state = STATE_PRIMARY if primary else STATE_BACKUP
+        self.state = Value('i', STATE_PRIMARY if primary else STATE_BACKUP)
 
         self.event           = None  # Current event
         self.peer_expiry     = 0     # When peer is considered 'dead'
@@ -48,8 +52,8 @@ class BinaryStar(object):
         self.slave_callback  = None  # Call when become slave
 
         # Create publisher for state going to peer
-        self.statepub = self.ctx.socket(zmq.PUB)
-        self.statepub.bind(local)
+#        self.statepub = self.ctx.socket(zmq.PUB)
+#        self.statepub.bind(local)
 
         # Create subscriber for state coming from peer
         self.statesub = self.ctx.socket(zmq.SUB)
@@ -60,9 +64,11 @@ class BinaryStar(object):
         self.statesub = ZMQStream(self.statesub, self.loop)
 
         # setup basic reactor events
-        self.heartbeat = PeriodicCallback(self.send_state,
-                                          HEARTBEAT, self.loop)
+#        self.heartbeat = PeriodicCallback(self.send_state,
+#                                          HEARTBEAT, self.loop)
         self.statesub.on_recv(self.recv_state)
+
+        self.heartbeat = Heartbeat(local, self.state)
 
     def update_peer_expiry(self):
         """Update peer expiry time to be 2 heartbeats from now."""
@@ -70,15 +76,15 @@ class BinaryStar(object):
 
     def start(self):
         self.update_peer_expiry()
+#        self.heartbeat.start()
+
         self.heartbeat.start()
 
-        try:
-            self.loop.start()
-        except Exception as e:
-            log.error('Exception occurred: %s' % e)
-            raise
-
-        print 'start'
+#        try:
+#            self.loop.start()
+#        except Exception as e:
+#            log.error('Exception occurred: %s' % e)
+#            raise
 
         self.workers = []
         for i in range(5):
@@ -101,8 +107,11 @@ class BinaryStar(object):
 
     def stop(self):
         log.info('Stopping server...')
-        self.loop.stop()
+#        self.loop.stop()
+#        self.heartbeat.stop()
         self.heartbeat.stop()
+        self.heartbeat.join()
+#        self.heartbeat.join()
         log.info('Stopping server...done')
 
     def execute_fsm(self):
@@ -111,86 +120,88 @@ class BinaryStar(object):
         returns True if connections should be accepted, False otherwise.
         """
         accept = True
-        if self.state == STATE_PRIMARY:
-            # Primary server is waiting for peer to connect
-            # Accepts CLIENT_REQUEST events in this state
-            if self.event == PEER_BACKUP:
-                log.info("Connected to backup (slave), ready as master")
-                self.state = STATE_ACTIVE
-                if self.master_callback:
-                    self.loop.add_callback(self.master_callback)
-            elif self.event == PEER_ACTIVE:
-                log.info("Connected to backup (master), ready as slave")
-                self.state = STATE_PASSIVE
-                if self.slave_callback:
-                    self.loop.add_callback(self.slave_callback)
-            elif self.event == CLIENT_REQUEST:
-                if time.time() >= self.peer_expiry:
-                    log.info("Request from client, ready as master")
-                    self.state = STATE_ACTIVE
+
+        with self.state.get_lock():
+            if self.state.value == STATE_PRIMARY:
+                # Primary server is waiting for peer to connect
+                # Accepts CLIENT_REQUEST events in this state
+                if self.event == PEER_BACKUP:
+                    log.info("Connected to backup (slave), ready as master")
+                    self.state.value = STATE_ACTIVE
                     if self.master_callback:
                         self.loop.add_callback(self.master_callback)
-                else:
-                    # don't respond to clients yet - we don't know if
-                    # the backup is currently Active as a result of
-                    # a successful failover
+                elif self.event == PEER_ACTIVE:
+                    log.info("Connected to backup (master), ready as slave")
+                    self.state.value = STATE_PASSIVE
+                    if self.slave_callback:
+                        self.loop.add_callback(self.slave_callback)
+                elif self.event == CLIENT_REQUEST:
+                    if time.time() >= self.peer_expiry:
+                        log.info("Request from client, ready as master")
+                        self.state.value = STATE_ACTIVE
+                        if self.master_callback:
+                            self.loop.add_callback(self.master_callback)
+                    else:
+                        # don't respond to clients yet - we don't know if
+                        # the backup is currently Active as a result of
+                        # a successful failover
+                        accept = False
+            elif self.state.value == STATE_BACKUP:
+                # Backup server is waiting for peer to connect
+                # Rejects CLIENT_REQUEST events in this state
+                if self.event == PEER_ACTIVE:
+                    log.info("Connected to primary (master), ready as slave")
+                    self.state.value = STATE_PASSIVE
+                    if self.slave_callback:
+                        self.loop.add_callback(self.slave_callback)
+                elif self.event == CLIENT_REQUEST:
                     accept = False
-        elif self.state == STATE_BACKUP:
-            # Backup server is waiting for peer to connect
-            # Rejects CLIENT_REQUEST events in this state
-            if self.event == PEER_ACTIVE:
-                log.info("Connected to primary (master), ready as slave")
-                self.state = STATE_PASSIVE
-                if self.slave_callback:
-                    self.loop.add_callback(self.slave_callback)
-            elif self.event == CLIENT_REQUEST:
-                accept = False
-        elif self.state == STATE_ACTIVE:
-            # Server is active
-            # Accepts CLIENT_REQUEST events in this state
-            # The only way out of ACTIVE is death
-            if self.event == PEER_ACTIVE:
-                # Two masters would mean split-brain
-                log.error("Fatal error - dual masters, aborting")
-                raise FSMError("Dual Masters")
-        elif self.state == STATE_PASSIVE:
-            # Server is passive
-            # CLIENT_REQUEST events can trigger failover if peer looks dead
-            if self.event == PEER_PRIMARY:
-                # Peer is restarting - become active, peer will go passive
-                log.info("Primary (slave) is restarting, ready as master")
-                self.state = STATE_ACTIVE
-            elif self.event == PEER_BACKUP:
-                # Peer is restarting - become active, peer will go passive
-                log.info("Backup (slave) is restarting, ready as master")
-                self.state = STATE_ACTIVE
-            elif self.event == PEER_PASSIVE:
-                # Two passives would mean cluster would be non-responsive
-                log.error("Fatal error - dual slaves, aborting")
-                raise FSMError("Dual slaves")
-            elif self.event == CLIENT_REQUEST:
-                # Peer becomes master if timeout has passed
-                # It's the client request that triggers the failover
-                assert self.peer_expiry > 0
-                if time.time() >= self.peer_expiry:
-                    # If peer is dead, switch to the active state
-                    log.info("Failover successful, ready as master")
-                    self.state = STATE_ACTIVE
-                else:
-                    # If peer is alive, reject connections
-                    accept = False
-            # Call state change handler if necessary
-            if self.state == STATE_ACTIVE and self.master_callback:
-                self.loop.add_callback(self.master_callback)
-        return accept
+            elif self.state.value == STATE_ACTIVE:
+                # Server is active
+                # Accepts CLIENT_REQUEST events in this state
+                # The only way out of ACTIVE is death
+                if self.event == PEER_ACTIVE:
+                    # Two masters would mean split-brain
+                    log.error("Fatal error - dual masters, aborting")
+                    raise FSMError("Dual Masters")
+            elif self.state.value == STATE_PASSIVE:
+                # Server is passive
+                # CLIENT_REQUEST events can trigger failover if peer looks dead
+                if self.event == PEER_PRIMARY:
+                    # Peer is restarting - become active, peer will go passive
+                    log.info("Primary (slave) is restarting, ready as master")
+                    self.state.value = STATE_ACTIVE
+                elif self.event == PEER_BACKUP:
+                    # Peer is restarting - become active, peer will go passive
+                    log.info("Backup (slave) is restarting, ready as master")
+                    self.state.value = STATE_ACTIVE
+                elif self.event == PEER_PASSIVE:
+                    # Two passives would mean cluster would be non-responsive
+                    log.error("Fatal error - dual slaves, aborting")
+                    raise FSMError("Dual slaves")
+                elif self.event == CLIENT_REQUEST:
+                    # Peer becomes master if timeout has passed
+                    # It's the client request that triggers the failover
+                    assert self.peer_expiry > 0
+                    if time.time() >= self.peer_expiry:
+                        # If peer is dead, switch to the active state
+                        log.info("Failover successful, ready as master")
+                        self.state.value = STATE_ACTIVE
+                    else:
+                        # If peer is alive, reject connections
+                        accept = False
+                # Call state change handler if necessary
+                if self.state.value == STATE_ACTIVE and self.master_callback:
+                    self.loop.add_callback(self.master_callback)
+            return accept
 
     # ---------------------------------------------------------------------
     # Reactor event handlers
 
-    def send_state(self):
-        """Publish our state to peer"""
-        print 'aaaa'
-        self.statepub.send_string("%d" % self.state)
+#    def send_state(self):
+#        """Publish our state to peer"""
+#        print 'aaaa'
+#        self.statepub.send_string("%d" % self.state.value)
 
     def recv_state(self, msg):
         """Receive state from peer, execute finite state machine"""
