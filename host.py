@@ -33,7 +33,14 @@ class Host(object):
         self._age  = 5
 
         self._capabilities['hostname'] = ''
-            
+
+    def copy(self, host):
+        with self._lock:
+            self._alive        = host.get_alive()
+            self._age          = host.get_age()
+            self._capabilities = host.get_capabilities()
+            self._state        = host.get_state()
+
     def get_id(self):
         return self._id
 
@@ -52,9 +59,14 @@ class Host(object):
         with self._lock:
             self._capabilities = capabilities
 
-    def get_capabilities(self):
+    def get_capabilities(self, cap=None):
         with self._lock:
-            return self._capabilities
+            if not cap:
+                return self._capabilities
+            elif not cap in self._capabilities:
+                return None
+            else:
+                return self._capabilities[cap]
 
     def get_state(self):
         with self._lock:
@@ -69,14 +81,6 @@ class Host(object):
     def get_alive(self):
         with self._lock:
             return self._alive
-
-    def set_capabilities(self, capabilities):
-        with self._lock:
-            self._capabilities = capabilities
-
-    def get_capabilities(self):
-        with self._lock:
-            return self._capabilities
 
     def has_param(self, param_name):
         with self._lock:
@@ -164,8 +168,21 @@ class Host(object):
             d['age']          = self._age
             d['capabilities'] = self._capabilities
 
-            d_json = json.dumps(d)
+            d_json = json.dumps(d, default=lambda o: o.__dict__, sort_keys=True, indent=4)
             return d_json
+
+    def toJSON(self):
+        return self.to_json()
+
+    def __reduce__(self):
+        kwargs                 = {}
+        kwargs['id']           = self._id
+        kwargs['state']        = self._state
+        kwargs['alive']        = self._alive
+        kwargs['age']          = self._age
+        kwargs['capabilities'] = self._capabilities
+
+        return __new_host__, (self.__class__, kwargs), None
 
     def update(self, data):
         with self._lock:
@@ -173,6 +190,17 @@ class Host(object):
             self._alive        = eval('HostAlive.%s' % data['alive'])
             self._age          = int(data['age'])
             self._capabilities = data['capabilities']
+
+def __new_host__(cls, kwargs):
+    instance = super(Host, cls).__new__(cls)
+    instance.__init__(kwargs['id'])
+
+    instance._state        = kwargs['state']
+    instance._alive        = kwargs['alive']
+    instance._age          = kwargs['age']
+    instance._capabilities = kwargs['capabilities']
+
+    return instance
 
 class InvalidOperator(Exception):
     pass

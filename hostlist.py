@@ -1,45 +1,50 @@
-import threading
 import json
+
+from multiprocessing import Lock
+from multiprocessing.managers import BaseManager
 
 from host_state import HostAlive
 from host import Host
 from dynamic_host import DynamicHost
 
 class HostList(list):
-    _count = -1
-    _lock  = None
+    count = -1
+    lock  = None
 
-    def __init__(self):
+    def __init__(self, hostlist=[]):
         super(HostList, self).__init__()
 
-        self._count = 0
-        self._lock  = threading.Lock()
+        self.count = len(hostlist)
+        if len(hostlist) > 0:
+            self.extend(hostlist)
+
+#        self.lock  = Lock()
 
     def append(self, host):
-        with self._lock:
-            self._count = self._count + 1
+#        with self.lock:
+            self.count = self.count + 1
             super(HostList, self).append(host)
 
     def create_host(self):
-        with self._lock:
-            self._count = self._count + 1
+#        with self.lock:
+            self.count = self.count + 1
 
-            host = Host(self._count)
+            host = Host(self.count)
             super(HostList, self).append(host)
 
             return host
 
     def create_dynamic_host(self):
-        with self._lock:
-            self._count = self._count + 1
+#        with self.lock:
+            self.count = self.count + 1
 
-            host = DynamicHost(self._count)
+            host = DynamicHost(self.count)
             super(HostList, self).append(host)
 
             return host
 
     def get_by_hostname(self, name):
-        with self._lock:
+#        with self.lock:
             for host in self:
                 caps = host.get_capabilities()
                 if 'hostname' in caps and \
@@ -49,7 +54,7 @@ class HostList(list):
             return None
 
     def get_by_id(self, id):
-        with self._lock:
+#        with self.lock:
             for host in self:
                 if host.get_id() == id:
                     return host
@@ -57,7 +62,7 @@ class HostList(list):
             return None
 
     def get_by_state(self, state):
-        with self._lock:
+#        with self.lock:
             hosts = HostList()
             for host in self:
                 if host.get_state() == state:
@@ -66,12 +71,12 @@ class HostList(list):
             return hosts
 
     def dump(self):
-        with self._lock:
+#        with self.lock:
             for h in self:
                 h.dump()
 
     def to_json(self):
-        with self._lock:
+#        with self.lock:
             l = []
             for host in self:
                 l.append(host.to_json())
@@ -81,8 +86,7 @@ class HostList(list):
     @staticmethod
     def from_json(data):
         hostlist = HostList()
-        list_json = json.loads(data)
-        for l in list_json:
+        for l in data:
             host = hostlist.create_host()
             host.update(eval(l))
 

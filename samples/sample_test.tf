@@ -1,7 +1,7 @@
 [product]
 git_repo = 
 git_branch = 
-url = 
+url = https://github.com/SzymonGraczyk/CapDet.git
 file = 
 
 [configuration]

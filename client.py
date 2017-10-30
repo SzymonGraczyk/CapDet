@@ -1,48 +1,48 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 
-from time import sleep
-import zmq
+import pika
+import uuid
+import sys
 
-REQUEST_TIMEOUT = 1000  # msecs
-SETTLE_DELAY = 2000  # before failing over
+class FibonacciRpcClient(object):
+    def __init__(self):
+        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host='localhost'))
 
-def main():
-    server = ['tcp://localhost:5001', 'tcp://localhost:5003']
-    server_nbr = 0
-    ctx = zmq.Context()
-    client = ctx.socket(zmq.REQ)
-    client.connect(server[server_nbr])
-    poller = zmq.Poller()
-    poller.register(client, zmq.POLLIN)
+        self.channel = self.connection.channel()
 
-    sequence = 0
-    while True:
-        client.send_string("%s" % sequence)
+        self.channel.exchange_declare(exchange      = 'messages',
+                                      exchange_type = 'direct')
 
-        expect_reply = True
-        while expect_reply:
-            socks = dict(poller.poll(REQUEST_TIMEOUT))
-            if socks.get(client) == zmq.POLLIN:
-                reply = client.recv_string()
-                if int(reply) == sequence:
-                    print("I: server replied OK (%s)" % reply)
-                    expect_reply = False
-                    sequence += 1
-                    sleep(1)
-                else:
-                    print("E: malformed reply from server: %s" % reply)
-            else:
-                print("W: no response from server, failing over")
-                sleep(SETTLE_DELAY / 1000)
-                poller.unregister(client)
-                client.close()
-                server_nbr = (server_nbr + 1) % 2
-                print("I: connecting to server at %s.." % server[server_nbr])
-                client = ctx.socket(zmq.REQ)
-                poller.register(client, zmq.POLLIN)
-                # reconnect and resend request
-                client.connect(server[server_nbr])
-                client.send_string("%s" % sequence)
+        result = self.channel.queue_declare(exclusive=True)
+        self.callback_queue = result.method.queue
 
-if __name__ == '__main__':
-    main()
+        self.channel.basic_consume(self.on_response,
+                                   no_ack=True,
+                                   queue=self.callback_queue)
+
+    def on_response(self, ch, method, props, body):
+        if self.corr_id == props.correlation_id:
+            self.response = body
+
+    def call(self, n):
+        key = sys.argv[1] if len(sys.argv) > 1 else 'abc'
+
+        self.response = None
+        self.corr_id = str(uuid.uuid4())
+        self.channel.basic_publish(exchange='messages',
+                                   routing_key=key,
+                                   properties=pika.BasicProperties(
+                                         reply_to = self.callback_queue,
+                                         correlation_id = self.corr_id,
+                                         ),
+                                   body=str(n))
+        while self.response is None:
+            self.connection.process_data_events()
+        return int(self.response)
+
+fibonacci_rpc = FibonacciRpcClient()
+
+print(" [x] Requesting fib(30)")
+response = fibonacci_rpc.call(30)
+print(" [.] Got %r" % response)
+

@@ -67,7 +67,7 @@ class MsgClaimHost(Msg):
 
         super(MsgClaimHost, self).__init__('10')
 
-        self.append(str(host_id))
+        self.append(host_id)
         self.append(claim_id)
 
 class MsgReclaimHost(Msg):
@@ -77,7 +77,7 @@ class MsgReclaimHost(Msg):
 
         super(MsgReclaimHost, self).__init__('11')
 
-        self.append(str(host_id))
+        self.append(host_id)
         self.append(claim_id)
 
 class MsgScheduleTest(Msg):
@@ -88,7 +88,7 @@ class MsgScheduleTest(Msg):
 
         super(MsgScheduleTest, self).__init__('12')
 
-        self.append(str(host_id))
+        self.append(host_id)
         self.append(claim_id)
         self.append(script.to_json())
 
@@ -100,3 +100,8 @@ class MsgExecuteTest(Msg):
 
         self.append(script)
     
+class MsgExecuteDone(Msg):
+    def __init__(self, hostname):
+        super(MsgExecuteDone, self).__init__('14')
+
+        self.append(hostname)

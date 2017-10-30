@@ -1,85 +1,237 @@
-#!/usr/bin/python
-
 import signal
-import sys
-import zmq
+import random
+import pika
+import json
 
-from event_dispatcher import EventDispatcher
-from binary_star_mt import BinaryStar
-from cthread import CThread
+from host import Host, HostAlive
+from dynamic_host import DynamicHost
+from hostlist import HostList
+from host_fsm import HostEvent, FSMEvents
+from server_config import ServerConfig
+from msg import MsgHostList, MsgExecuteTest
+#from alive_detector import AliveDetector
+from test.test_script import TestScript
+
 from logger.capdet_logger import CapDetLogger
-from capdet_config import CapDetConfig
 
-log    = CapDetLogger()
-config = CapDetConfig()
+log = CapDetLogger()
 
-class Server(CThread):
-    _runner = None
-    _eq     = None
+class Server(object):
+    connection = None
+    channel    = None
+    msg_types  = []
+    callbacks  = {}
 
-    def __init__(self, primary):
-        super(Server, self).__init__()
-
+    config     = None
+    
+    def __init__(self, msg_types, config):
         signal.signal(signal.SIGINT,  self.exit_gracefully)
         signal.signal(signal.SIGTERM, self.exit_gracefully)
 
-        self._eq = EventDispatcher()
+        self.msg_types = msg_types
+        self.config    = config
 
-        self._runner = Server.BStarRunner(primary, self._eq.enqueue)
-       
-    def run(self):
-        self._runner.start()
+#        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host='10.91.53.209'))
+#        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host='192.168.0.132'))
+        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host='localhost', heartbeat_interval=10))
 
-    def stop(self):
-        self._eq.stop()
-        self._runner.stop()
-        super(Server, self).stop()
+        self.channel = self.connection.channel(channel_number=1)
+
+#        self.channel.exchange_delete(exchange = 'messagles')
+        self.channel.exchange_declare(exchange      = 'messages',
+                                      exchange_type = 'direct')
+
+        self.queue_name = 'msg_queue'
+        res = self.channel.queue_declare(queue=self.queue_name, exclusive=False)
+
+        for msg_type in msg_types:
+            self.channel.queue_bind(exchange    = 'messages',
+                                    queue       = self.queue_name,
+                                    routing_key = msg_type)
+
+        self.register_callback('4',  self.msg4_callback)
+        self.register_callback('5',  self.get_hostlist)
+        self.register_callback('10', self.claim_host)
+        self.register_callback('11', self.reclaim_host)
+        self.register_callback('12', self.schedule_test)
+        self.register_callback('14', self.execution_done)
 
     def exit_gracefully(self, signum, frame):
         log.info('Stopping server gracefully..')
         self.stop()
         log.info('Stopping server gracefully..done')
 
-    class BStarRunner(CThread):
-        _star    = None
-        _enqueue = None
+    def register_callback(self, msg_type, callback):
+        assert not callback is None
 
-        def __init__(self, primary, enqueue_func):
-            super(Server.BStarRunner, self).__init__()
+        self.callbacks[msg_type] = callback
 
-#            server_address     = config['server']['address']
-            server_address     = '*'
-            server_port        = int(config['server']['in_port'])
-            server_endpoint    = 'tcp://%s:%d' % (server_address, server_port)
+    def msg4_callback(self, ch, method, props, body):
+        log.msg('Capabilities received')
 
-            ha_local_address   = config['server']['ha']['local']['address']
-            ha_local_port      = int(config['server']['ha']['local']['port'])
-            ha_local_endpoint  = 'tcp://%s:%d' % (ha_local_address, ha_local_port)
-            ha_remote_address  = config['server']['ha']['remote']['address']
-            ha_remote_port     = int(config['server']['ha']['remote']['port'])
-            ha_remote_endpoint = 'tcp://%s:%d' % (ha_remote_address, ha_remote_port)
+        data = eval(eval(body))
+        assert type(data) is dict
 
-            self._star = BinaryStar(primary, ha_local_endpoint, ha_remote_endpoint)
-            self._star.register_voter(server_endpoint, zmq.ROUTER, self.receive_callback)
+        if not 'hostname' in data['capabilities']:
+            log.error('No hostname in host capabilities')
+            return
 
-            self._enqueue = enqueue_func
+        hostname = data['capabilities']['hostname']
+        
+        host = self.config.hostlist().get_by_hostname(hostname)
+        if not host:
+            host = self.config.create_dynamic_host()
+            host.set_execute_test_callback(self.execute_test)
+        
+        host.update(data)
+        host.set_alive(HostAlive.HA_ALIVE)
+        self.config.update_host(host)
 
-        def receive_callback(self, socket, msg):
-            assert self._enqueue is not True
+    def get_hostlist(self, ch, method, props, body):
+        log.msg('Hostlist request received')
 
-            msg_id = msg[0]
-            data   = msg[1:]
-            data.append(socket)
-            data.append(msg_id)
+        hostlist = self.config.hostlist()
+        msg = hostlist.to_json()
 
-            msg[1] = 'ACK'
-            socket.send_multipart(msg[:2])
+        ch.basic_publish(exchange='',
+                         routing_key=props.reply_to,
+                         properties=pika.BasicProperties(
+                             correlation_id = props.correlation_id,
+                             content_type = 'application/json',
+                         ),
+                         body=str(msg))
+        
+        log.msg('Hostlist sent')
 
-            self._enqueue(data)
+    def claim_host(self, ch, method, props, body):
+        log.msg('Claim host msg received')
 
-        def run(self):
-            self._star.start()
+        hostlist = HostList()
 
-        def stop(self):
-            self._star.stop()
-            super(Server.BStarRunner, self).stop()
+        body = json.loads(body)
+        if len(body) == 2:
+            host_id  = body[0]
+            claim_id = body[1]
+
+            host = self.config.claim_host(host_id, claim_id)
+            if host:
+                hostlist.append(host)
+
+        msg = hostlist.to_json()
+
+        ch.basic_publish(exchange='',
+                         routing_key=props.reply_to,
+                         properties=pika.BasicProperties(
+                             correlation_id = props.correlation_id,
+                             content_type = 'application/json',
+                         ),
+                         body=str(msg))
+
+        log.msg('Claimed hostlist sent')
+
+    def reclaim_host(self, ch, method, props, body):
+        log.msg('Reclaim host msg received')
+
+        hostlist = HostList()
+
+        body = json.loads(body)
+        if len(body) == 2:
+            host_id  = body[0]
+            claim_id = body[1]
+
+            host = self.config.reclaim_host(host_id, claim_id)
+            if host:
+                hostlist.append(host)
+
+        msg = hostlist.to_json()
+
+        ch.basic_publish(exchange='',
+                         routing_key=props.reply_to,
+                         properties=pika.BasicProperties(
+                             correlation_id = props.correlation_id,
+                             content_type = 'application/json',
+                         ),
+                         body=str(msg))
+
+        log.msg('Reclaimed hostlist sent')
+
+    def schedule_test(self, ch, method, props, body):
+        log.msg('Schedule test msg received')
+
+        hostlist = HostList()
+
+        host_id  = None
+        claim_id = None
+        body = json.loads(body)
+        if len(body) == 3:
+            host_id  = body[0]
+            claim_id = body[1]
+            script   = eval(body[2])
+
+            test_script = TestScript()
+            test_script.from_json(script)
+
+            host = self.config.schedule(host_id, claim_id, script)
+            if host:
+                hostlist.append(host)
+
+        msg = hostlist.to_json()
+
+        ch.basic_publish(exchange='',
+                         routing_key=props.reply_to,
+                         properties=pika.BasicProperties(
+                             correlation_id = props.correlation_id,
+                             content_type = 'application/json',
+                         ),
+                         body=str(msg))
+
+        log.msg('Execute schedule response sent')
+
+        # Try to start tests
+        if host_id:
+            self.config.try_start_testing(host_id, claim_id)
+
+    def execution_done(self, ch, method, props, body):
+        log.msg('Execution done received')
+
+        hostname = body
+
+        self.config.execution_done(hostname)
+
+    def execute_test(self, host, script):
+        print host
+        print script
+        import time
+        time.sleep(5)
+
+    def dispatch(self, msg_type, ch, method, props, body):
+        if not msg_type in self.callbacks:
+            log.error('No callback for %s' % msg_type)
+            return
+
+        self.callbacks[msg_type](ch, method, props, body)
+
+    def on_request(self, ch, method, props, body):
+        self.dispatch(method.routing_key, ch, method, props, body)
+
+        ch.basic_ack(delivery_tag = method.delivery_tag)
+
+    def start(self):
+        self.channel.basic_qos(prefetch_count=1)
+        self.consumer_tag = self.channel.basic_consume(self.on_request, queue=self.queue_name)
+
+        log.msg(" [x] Awaiting RPC requests (%s)" % self.msg_types)
+        self.channel.start_consuming()
+
+    def stop(self):
+        for msg_type in self.msg_types:
+            self.channel.queue_unbind(exchange    = 'messages',
+                                      queue       = self.queue_name,
+                                      routing_key = msg_type)
+
+        self.connection.add_timeout(1, self.close_cb)
+        
+    def close_cb(self):
+        self.channel.stop_consuming(self.consumer_tag)
+        self.channel.close()
+        self.connection.close()

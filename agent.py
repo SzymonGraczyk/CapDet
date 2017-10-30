@@ -2,17 +2,16 @@
 
 import argparse
 import signal
-import sys
-import zmq
-
-from zmq.eventloop.ioloop import IOLoop, PeriodicCallback
+import pika
+import uuid
+import os
 
 from event_dispatcher import EventDispatcher
-from generic_agent import GenericAgent
 from cthread import CThread
 
 from logger.capdet_logger import CapDetLogger
 from logger.logger_stdout import LoggerStdout
+from logger.logger_file import LoggerFile
 
 from capdet_config import CapDetConfig
 from detectors.capabilities import Capabilities
@@ -20,15 +19,15 @@ from detectors.capabilities import Capabilities
 from host import Host
 from host_state import HostState, HostAlive
 
-from msg import MsgHostCapabilities, MsgHeartbeat, MsgSetState, MsgGetState
+from msg import MsgHostCapabilities, MsgHeartbeat, MsgSetState, MsgGetState, MsgExecuteDone
+
+from test.test_script import TestScript
 
 config = CapDetConfig()
 log    = CapDetLogger()
 
 class Agent(CThread):
-    _eq     = None
-    _runner = None
-    _host   = None
+    host = None
 
     def __init__(self):
         super(Agent, self).__init__()
@@ -38,129 +37,149 @@ class Agent(CThread):
 
         capabilities = Capabilities()
 
-        self._host = Host()
-        self._host.set_alive(HostAlive.HA_ALIVE)
-        self._host.set_capabilities(capabilities)
+        self.host = Host()
+        self.host.set_alive(HostAlive.HA_ALIVE)
+        self.host.set_capabilities(capabilities)
 
-        self._eq = EventDispatcher()
-        self._eq.register_callback('-1', self.dispatch_unknown_msg_type)
-        self._eq.register_callback('1',  self.send_capabilities)
-        self._eq.register_callback('2',  self.dispatch1)
-        self._eq.register_callback('3',  self.dispatch2)
-        self._eq.register_callback('7',  self.get_state)
-        self._eq.register_callback('9',  self.set_state)
-        self._eq.register_callback('13', self.execute_test)
+#        self._heartbeat = PeriodicCallback(self.send_heartbeat, 5000, IOLoop.current())
 
-        self._runner = self.BStarRunner(self._eq.enqueue)
+#        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host='10.91.53.209'))
+        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host='localhost', heartbeat_interval=10))
 
-        self._heartbeat = PeriodicCallback(self.send_heartbeat, 5000, IOLoop.current())
-       
-    def run(self):
-        import time
-        time.sleep(2)
+        self.channels = {}
+        channel1 = self.connection.channel(channel_number=1)
 
-        self._heartbeat.start()
-        log.info('Heartbeat started')
+        channel1.exchange_declare(exchange      = 'messages',
+                                  exchange_type = 'direct')
 
-        self._runner.start()
-        self.send_capabilities([])
+        result = channel1.queue_declare(exclusive=True)
+        callback_queue = result.method.queue
 
-        while self.isRunning():
-            import time
-            time.sleep(1)
+        channel1.basic_consume(self.on_response1,
+                               no_ack=True,
+                               queue=callback_queue)
+        self.channels[1] = (channel1, callback_queue)
 
-    def stop(self):
-        self._heartbeat.stop()
-        self._eq.stop()
-        self._runner.stop()
-        super(Agent, self).stop()
+        channel2 = self.connection.channel(channel_number=2)
+
+        channel2.exchange_declare(exchange      = 'tests',
+                                  exchange_type = 'direct')
+        
+        callback_queue = 'tests_queue'
+        result = channel2.queue_declare(queue=callback_queue, exclusive=True)
+
+        channel2.queue_bind(exchange    = 'tests',
+                            queue       = callback_queue,
+                            routing_key = '1')
+
+        self.consumer_tag = channel2.basic_consume(self.on_response2,
+                                                   no_ack=False,
+                                                   queue=callback_queue)
+
+        self.channels[2] = (channel2, callback_queue)
 
     def exit_gracefully(self, signum, frame):
-        log.info('Stopping server gracefully..')
+        log.info('Stopping agent gracefully..')
         self.stop()
-        log.info('Stopping server gracefully..done')
+        log.info('Stopping agent gracefully..done')
 
-    def dispatch1(self, msg):
-        log.info('d1')
+    def on_response1(self, ch, method, props, body):
+        if self.corr_id == props.correlation_id:
+            self.response = body
 
-    def dispatch2(self, msg):
-        log.info('d2')
-        self._runner._star.send(['2', 'tralalla'])
+    def on_response2(self, ch, method, props, body):
+        ch.basic_ack(delivery_tag = method.delivery_tag)
+        log.msg('Received test script')
 
-    def send_heartbeat(self):
-        hostname = self._host.get_capabilities()['hostname']
-        msg = MsgHeartbeat(hostname)
+        body = eval(body)
+        test_script = TestScript()
+        test_script.from_json(body)
 
-        self._runner._star.send(msg)
-        log.msg('Heartbeat send to server')
+        res = test_script.make_execution_dir()
+        if res:
+            get_products_log_path = os.path.join(test_script.get_execution_dir(), 'get_products.log')
+            get_products_log = LoggerFile(get_products_log_path, 2)
+            log.add_logger(get_products_log)
 
-    def send_capabilities(self, msg):
-        msg = MsgHostCapabilities(self._host)
+            test_script.get_products()
 
-        self._runner._star.send(msg)
+            log.remove_logger(get_products_log)
+
+        import time
+        time.sleep(10)
+
+        remove_products_log_path = os.path.join(test_script.get_execution_dir(), 'remove_products.log')
+        remove_products_log = LoggerFile(remove_products_log_path, 2)
+        log.add_logger(remove_products_log)
+
+        test_script.remove_products()
+
+        log.remove_logger(remove_products_log)
+
+        hostname = self.host.get_capabilities('hostname')
+        if not hostname:
+            log.error("Unknown hostname... shouldn't happen")
+            return
+
+        msg = MsgExecuteDone(hostname)
+        self.send(1, msg)
+
+    def send(self, ch, msg):
+        key  = str(msg[0])
+        data = msg[1]
+
+        channel, queue = self.channels[ch]
+
+        self.response = None
+        self.corr_id = str(uuid.uuid4())
+        channel.basic_publish(exchange='messages',
+                              routing_key=key,
+                              properties=pika.BasicProperties(
+                                  reply_to = queue,
+                                  correlation_id = self.corr_id,
+                                  content_type = 'application/json',
+                              ),
+                              body=data)
+
+    def receive(self, timeout=10):
+        ticks = 0
+        while self.response is None and \
+              ticks < timeout:
+            self.connection.process_data_events(1)
+            ticks = ticks + 1
+
+        if ticks == timeout:
+            return None
+
+        return int(self.response)
+
+    def call(self, n):
+        msg = MsgHeartbeat()
+        return self.send(1, msg)
+
+    def send_capabilities(self):
+        msg = MsgHostCapabilities(self.host)
+
+        self.send(1, msg)
         log.msg('Capabilities sent to server')
 
-    def send_state(self):
-        state = self._host.get_state()
-        msg = MsgSetState(state)
+    def run(self):
+        self.send_capabilities()
+
+        channel, _ = self.channels[1]
+        channel.start_consuming()
+
+    def stop(self):
+        self.connection.add_timeout(1, self.close_cb)
+
+        super(Agent, self).stop()
+
+    def close_cb(self):
+        ch, _ = self.channels[1]
+        ch.stop_consuming(self.consumer_tag)
+        ch.close()
+        self.connection.close()
         
-        self._runner._star.send(msg)
-        log.msg('Host state sent to server')
-
-    def get_state(self, msg):
-        log.msg('Get state request received')
-        self.send_state(msg)
-
-    def set_state(self, msg):
-        log.msg('Set state request received')
-        state = eval(msg[0])
-        self._host.set_state(state)
-
-    def execute_test(self, msg):
-        log.msg('Execute test request received')
-        
-        with open('/tmp/rec_script', 'w') as f:
-            f.write(msg[0])
-
-    def dispatch_unknown_msg_type(self, msg):
-        log.error('Unknown message type: %s' % msg[0])
-
-    class BStarRunner(CThread):
-        _star    = None
-        _enqueue = None
-
-        def __init__(self, enqueue_func):
-            super(Agent.BStarRunner, self).__init__()
-
-            self._enqueue = enqueue_func
-
-            server_address  = config['server']['address']
-            server_in_port  = int(config['server']['in_port'])
-            server_out_port = int(config['server']['out_port'])
-            server_in_endpoint = 'tcp://*:%d' % (server_out_port)
-            server_out_endpoint = 'tcp://%s:%d' % (server_address, server_in_port)
-
-            self._star = GenericAgent()
-            self._star.register_sender(server_out_endpoint, zmq.DEALER)
-            self._star.register_receiver(server_in_endpoint, zmq.ROUTER, self.receive_callback)
-
-        def receive_callback(self, socket, msg):
-            assert self._enqueue is not None
-
-            data = msg[1:]
-
-            msg[1] = 'ACK'
-            socket.send_multipart(msg[:2])
-
-            self._enqueue(data)
-
-        def run(self):
-            self._star.start()
-
-        def stop(self):
-            self._star.stop()
-            super(Agent.BStarRunner, self).stop()
-
 def main():
     parser = argparse.ArgumentParser(prog='agent')
     parser.add_argument('-v', '--verbosity', action='count', default=0, help='Verbosity level')
@@ -168,6 +187,9 @@ def main():
 
     log_stdout = LoggerStdout(args.verbosity)
     log.add_logger(log_stdout)
+
+    log_file = LoggerFile('/var/log/CapDet/agent.log', args.verbosity)
+    log.add_logger(log_file)
 
     agent = Agent()
     agent.run()

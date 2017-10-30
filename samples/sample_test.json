@@ -1,0 +1,28 @@
+{
+    "products": {
+	"CapDet": {
+	    "url": "https://github.com/SzymonGraczyk/CapDet.git",
+	    "dst": "/opt/CapDet"
+	}
+    },
+
+    "configurations": [
+
+    ],
+
+    "hosts": [
+
+    ],
+
+    "installer": {
+
+    },
+
+    "executor": {
+
+    },
+
+    "report": {
+
+    }
+}

@@ -3,12 +3,12 @@
 import argparse
 import random
 import socket
+import uuid
+import pika
 import json
-import zmq
 import sys
 import os
 
-from generic_agent import GenericAgent
 from cthread import CThread
 
 from host import Host, HostFilter, HostAlive
@@ -21,12 +21,13 @@ from capdet_config import CapDetConfig
 
 from logger.capdet_logger import CapDetLogger
 from logger.logger_stdout import LoggerStdout
+from logger.logger_file import LoggerFile
 
 log    = CapDetLogger()
 config = CapDetConfig()
 
 class Cli(CThread):
-    _runner = None
+    response = None
 
     def __init__(self):
         super(Cli, self).__init__()
@@ -34,37 +35,82 @@ class Cli(CThread):
         address = config['server']['address']
         port    = config['server']['in_port']
         
-        self._runner = self.CliRunner()
-
         os = OperatorsFactory()
 
-    def run(self):
-        self._runner.start()
+        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host='localhost'))
 
+        self.channel = self.connection.channel()
+
+        self.channel.exchange_declare(exchange      = 'messages',
+                                      exchange_type = 'direct')
+
+        result = self.channel.queue_declare(exclusive=True)
+        self.callback_queue = result.method.queue
+
+        self.channel.basic_consume(self.on_response,
+                                   no_ack=True,
+                                   queue=self.callback_queue)
+
+    def on_response(self, ch, method, props, body):
+        if self.corr_id == props.correlation_id:
+            self.response = body
+
+    def run(self):
         while self.isRunning():
             import time
             time.sleep(1)
 
     def stop(self):
-        self._runner.stop()
+        self.connection.close()
         super(Cli, self).stop()
+
+    def send(self, msg):
+        key  = str(msg[0])
+        if len(msg) > 1:
+            data = json.dumps(msg[1:])
+        else:
+            data = ''
+
+        self.corr_id = str(uuid.uuid4())
+        self.channel.basic_publish(exchange='messages',
+                                   routing_key=key,
+                                   properties=pika.BasicProperties(
+                                         reply_to = self.callback_queue,
+                                         correlation_id = self.corr_id,
+                                         content_type = 'application/json',
+                                         delivery_mode = 2,
+                                         ),
+                                   body=data)
+
+    def receive(self, timeout=10):
+        ticks = 0
+        while self.response is None and \
+              ticks < timeout:
+            self.connection.process_data_events(1)
+            ticks = ticks + 1
+
+        if ticks == timeout:
+            log.warning('Receive timed out')
+            return None
+
+        return self.response
 
     def get_hosts(self):
         msg = MsgGetHostList()
-        self._runner._star.send(msg)
+        self.send(msg)
 
         log.msg('get_hosts send to server')
 
-        msg = self._runner._star.receive()
+        msg = self.receive()
         if not msg:
             return HostList()
 
-        msg_id = msg[0]
-        if msg_id != '6':
-            log.error('Invalid reply from server')
-            return
+#        msg_id = msg[0]
+#        if msg_id != '6':
+#            log.error('Invalid reply from server')
+#            return
 
-        data = msg[1]
+        data = eval(msg)
         hostlist = HostList.from_json(data)
 
         return hostlist
@@ -73,20 +119,20 @@ class Cli(CThread):
         assert host_id > 0
 
         msg = MsgClaimHost(host_id, claim_id)
-        self._runner._star.send(msg)
+        self.send(msg)
 
         log.msg("claim_host (id: %d) send to server" % host_id)
 
-        msg = self._runner._star.receive()
+        msg = self.receive()
         if not msg:
             return HostList()
 
-        msg_id = msg[0]
-        if msg_id != '6':
-            log.error('Invalid reply from server')
-            return
+#        msg_id = msg[0]
+#        if msg_id != '6':
+#            log.error('Invalid reply from server')
+#            return
 
-        data = msg[1]
+        data = eval(msg)
         hostlist = HostList.from_json(data)
 
         return hostlist
@@ -95,20 +141,20 @@ class Cli(CThread):
         assert host_id > 0
 
         msg = MsgReclaimHost(host_id, claim_id)
-        self._runner._star.send(msg)
+        self.send(msg)
 
         log.msg("reclaim_host (id: %d) send to server" % host_id)
 
-        msg = self._runner._star.receive()
+        msg = self.receive()
         if not msg:
             return HostList()
 
-        msg_id = msg[0]
-        if msg_id != '6':
-            log.error('Invalid reply from server')
-            return
+#        msg_id = msg[0]
+#        if msg_id != '6':
+#            log.error('Invalid reply from server')
+#            return
 
-        data = msg[1]
+        data = eval(msg)
         hostlist = HostList.from_json(data)
 
         return hostlist
@@ -117,20 +163,20 @@ class Cli(CThread):
         assert host_id > 0
 
         msg = MsgScheduleTest(host_id, claim_id, script)
-        self._runner._star.send(msg)
+        self.send(msg)
 
         log.msg("schedule_test (id: %d) send to server" % host_id)
 
-        msg = self._runner._star.receive()
+        msg = self.receive()
         if not msg:
             return HostList()
 
-        msg_id = msg[0]
-        if msg_id != '6':
-            log.error('Invalid reply from server')
-            return
+#        msg_id = msg[0]
+#        if msg_id != '6':
+#            log.error('Invalid reply from server')
+#            return
 
-        data = msg[1]
+        data = eval(msg)
         hostlist = HostList.from_json(data)
 
         return hostlist
@@ -299,7 +345,7 @@ def action_schedule(args):
         return
 
     test_script = TestScript()
-    test_script.parse(script)
+    test_script.load(script)
 
     client = Cli()
     hostlist = client.schedule_test(host_id, claim_id, test_script)
@@ -364,6 +410,9 @@ def main():
 
     log_stdout = LoggerStdout(args.verbosity)
     log.add_logger(log_stdout)
+
+    log_file = LoggerFile('/var/log/CapDet/cli.log', args.verbosity)
+    log.add_logger(log_file)
 
     args.func(args)
     
