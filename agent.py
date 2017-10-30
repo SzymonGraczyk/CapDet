@@ -105,6 +105,14 @@ class Agent(CThread):
 
             log.remove_logger(get_products_log)
 
+            install_log_path = os.path.join(test_script.get_execution_dir(), 'install.log')
+            install_log = LoggerFile(install_log_path, 2)
+            log.add_logger(install_log)
+
+            test_script.install_products()
+
+            log.remove_logger(install_log)
+
         import time
         time.sleep(10)
 

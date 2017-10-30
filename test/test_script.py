@@ -1,4 +1,5 @@
 import ConfigParser
+import importlib
 import shutil
 import json
 import os
@@ -165,6 +166,31 @@ class TestScript(dict):
                 continue
 
             log.msg("Removing product path: '%s'... done" % product_path)
+
+    def install_products(self):
+        if not self.exec_dir:
+            raise NoExecutionDir()
+
+        if not 'path' in self['installer']:
+            log.error("No path defined for installer")
+            return False
+
+        installer_path = self['installer']['path']
+        if not os.path.exists(installer_path):
+            log.error("Installer path does not exist: '%s'" % installer_path)
+            return False
+
+#        importlib.import_module(installer_path)
+        
+#        import sys
+#        print sys.modules[__name__]
+
+        name = installer_path.replace('.py', '')
+        name = name.replace('/', '.')
+        print name
+        print __import__(name)
+
+        return True
 
     def to_json(self):
         return json.dumps(self)
