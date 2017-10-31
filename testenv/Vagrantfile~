@@ -1,0 +1,59 @@
+VAGRANTFILE_API_VERSION = "2"
+
+boxes_servers = [
+  {
+    :hostname => "rabbit1",
+    :ip       => "192.168.64.100",
+    :port     => "10122",
+    :ram      => "2048",
+  },
+  {
+    :hostname => "rabbit2",
+    :ip       => "192.168.64.101",
+    :port     => "10123",
+    :ram      => "2048",
+  },
+  {
+    :hostname => "rabbit3",
+    :ip       => "192.168.64.102",
+    :port     => "10124",
+    :ram      => "2048",
+  },
+]
+
+Vagrant.configure(VAGRANTFILE_API_VERSION) do |config|
+  config.vm.box = "ubuntu/trusty64"
+
+  config.vm.provider :virtualbox do |v|
+    v.customize ["modifyvm", :id, "--natdnshostresolver1", "on"]
+  end
+
+  if Vagrant.has_plugin?("vagrant-proxyconf")
+    config.proxy.ftp      = "http://proxy-chain.intel.com:911"
+    config.proxy.http     = "http://proxy-chain.intel.com:911"
+    config.proxy.https    = "http://proxy-chain.intel.com:912"
+  end
+
+  boxes_servers.each do |opts|
+    config.vm.define opts[:hostname] do |config|
+      config.vm.hostname = opts[:hostname]
+
+      config.vm.network "private_network", ip: opts[:ip]
+      config.vm.network :forwarded_port, guest: 22, host: opts[:port], id: "ssh"
+
+      config.vm.provider :virtualbox do |v|
+          v.customize ["modifyvm", :id, "--memory", opts[:ram]]
+          v.customize ["modifyvm", :id, "--name", opts[:hostname]]
+      end
+
+      config.vm.provision "file", source: "~/.ssh/id_rsa.pub", destination: "/home/vagrant/.ssh/me.pub"
+      config.vm.provision "shell", inline: "cat /home/vagrant/.ssh/me.pub >> /home/vagrant/.ssh/authorized_keys"
+
+      config.vm.provision :shell, :path => "test.sh"
+
+      if Vagrant.has_plugin?("vagrant-proxyconf")
+        config.proxy.no_proxy = "localhost,127.0.0.1,#{opts[:hostname]}"
+      end
+    end
+  end
+end

@@ -41,10 +41,12 @@ class Agent(CThread):
         self.host.set_alive(HostAlive.HA_ALIVE)
         self.host.set_capabilities(capabilities)
 
+        address = config['server']['address']
+
 #        self._heartbeat = PeriodicCallback(self.send_heartbeat, 5000, IOLoop.current())
 
 #        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host='10.91.53.209'))
-        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host='localhost', heartbeat_interval=10))
+        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host='address', heartbeat_interval=10))
 
         self.channels = {}
         channel1 = self.connection.channel(channel_number=1)

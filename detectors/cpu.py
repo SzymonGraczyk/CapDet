@@ -36,4 +36,4 @@ class CPUDetector(DetectorInterface):
             if l.startswith(param):
                 return l.split(':')[1].strip()
 
-        return None
+        return ''

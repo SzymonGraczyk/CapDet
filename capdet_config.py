@@ -1,4 +1,5 @@
 import ConfigParser
+import sys
 import os
 
 from singleton import Singleton
