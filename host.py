@@ -36,7 +36,7 @@ class Host(object):
 
     def copy(self, host):
         with self._lock:
-            self._id           = host.get_id()
+#            self._id           = host.get_id()
             self._alive        = host.get_alive()
             self._age          = host.get_age()
             self._capabilities = host.get_capabilities()

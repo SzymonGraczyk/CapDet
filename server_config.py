@@ -35,6 +35,8 @@ class ServerConfig(object):
 
     def update_host(self, host):
         with self._lock:
+            print host.get_id()
+            self._hostlist.dump()
             orig_host = self._hostlist.get_by_id(host.get_id())
             if not orig_host:
                 log.error('No host in the host list')
