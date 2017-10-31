@@ -31,9 +31,12 @@ class Server(object):
         self.msg_types = msg_types
         self.config    = config
 
-#        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host='10.91.53.209'))
+        address = config['server']['address']
+        log.info("Connecting to server: %s" % address)
+
+        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=address))
 #        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host='192.168.0.132'))
-        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host='localhost', heartbeat_interval=10))
+#        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host='localhost', heartbeat_interval=10))
 
         self.channel = self.connection.channel(channel_number=1)
 
