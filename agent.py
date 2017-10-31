@@ -55,7 +55,7 @@ class Agent(CThread):
         channel1.exchange_declare(exchange      = 'messages',
                                   exchange_type = 'direct')
 
-        result = channel1.queue_declare(exclusive=True)
+        result = channel1.queue_declare(exclusive=False)
         callback_queue = result.method.queue
 
         channel1.basic_consume(self.on_response1,
@@ -69,7 +69,7 @@ class Agent(CThread):
                                   exchange_type = 'direct')
         
         callback_queue = 'tests_queue'
-        result = channel2.queue_declare(queue=callback_queue, exclusive=True)
+        result = channel2.queue_declare(queue=callback_queue, exclusive=False)
 
         channel2.queue_bind(exchange    = 'tests',
                             queue       = callback_queue,

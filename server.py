@@ -13,8 +13,10 @@ from msg import MsgHostList, MsgExecuteTest
 from test.test_script import TestScript
 
 from logger.capdet_logger import CapDetLogger
+from capdet_config import CapDetConfig
 
-log = CapDetLogger()
+config = CapDetConfig()
+log    = CapDetLogger()
 
 class Server(object):
     connection = None
@@ -24,12 +26,12 @@ class Server(object):
 
     config     = None
     
-    def __init__(self, msg_types, config):
+    def __init__(self, msg_types, cfg):
         signal.signal(signal.SIGINT,  self.exit_gracefully)
         signal.signal(signal.SIGTERM, self.exit_gracefully)
 
         self.msg_types = msg_types
-        self.config    = config
+        self.config    = cfg
 
         address = config['server']['address']
         log.info("Connecting to server: %s" % address)
