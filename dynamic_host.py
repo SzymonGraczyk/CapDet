@@ -151,7 +151,7 @@ class DynamicHost(Host):
 
     def update(self, data):
         with self._lock:
-            self._id           = int(data['id'])
+#            self._id           = int(data['id'])
             self._alive        = eval('HostAlive.%s' % data['alive'])
             self._age          = int(data['age'])
             self._capabilities = data['capabilities']

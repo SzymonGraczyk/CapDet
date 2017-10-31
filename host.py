@@ -187,7 +187,7 @@ class Host(object):
 
     def update(self, data):
         with self._lock:
-            self._id           = int(data['id'])
+#            self._id           = int(data['id'])
             self._state        = eval('FSMStates.%s' % data['state'])
             self._alive        = eval('HostAlive.%s' % data['alive'])
             self._age          = int(data['age'])
