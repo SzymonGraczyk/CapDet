@@ -45,7 +45,13 @@ class DynamicHost(Host):
 
     def execute_test(self):
         test_script = self._test_queue.get()
-        execute_test('localhost', test_script)
+
+        ip = self.get_capabilities('ip')
+        if not ip:
+            log.error("Host does not have IP... won't execute test")
+            return
+
+        execute_test(ip, test_script)
         
     def set_execute_test_callback(self, callback):
         self._execute_test_callback = callback

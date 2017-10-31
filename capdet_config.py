@@ -31,6 +31,9 @@ class CapDetConfig(dict):
         self['client']['heartbeat']               = False
         self['client']['heartbeat_interval']      = -1
 
+        self['agent']                             = {}
+        self['agent']['address']                  = ''
+
         cfg_path = '/etc/capdet/capdet.cfg'
         if not os.path.exists(cfg_path):
             log.error("Config does not exist: '%s'" % cfg_path)
@@ -62,3 +65,6 @@ class CapDetConfig(dict):
                 self['client']['heartbeat'] = bool(parser.get('client', 'heartbeat', False))
             if parser.has_option('client', 'heartbeat_interval'):
                 self['client']['heartbeat_interval'] = int(parser.get('client', 'heartbeat_interval', 60))
+
+            if parser.has_option('agent', 'address'):
+                self['agent']['address'] = parser.get('agent', 'address')
