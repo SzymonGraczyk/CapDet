@@ -185,10 +185,14 @@ class TestScript(dict):
 #        import sys
 #        print sys.modules[__name__]
 
+        print os.getcwd()
+
         name = installer_path.replace('.py', '')
         name = name.replace('/', '.')
         print name
-        print __import__(name)
+#        print __import__(name)
+#        cls = getattr(importlib.import_module('samples.sample_installer'), 'SampleInstaller')
+#        print cls
 
         return True
 
