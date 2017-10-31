@@ -25,6 +25,7 @@ class DynamicHost(Host):
 
     def copy(self, host):
         with self._lock:
+            self._id                                = host.get_id()
             self._alive                             = host.get_alive()
             self._age                               = host.get_age()
             self._capabilities                      = host.get_capabilities()
@@ -150,6 +151,7 @@ class DynamicHost(Host):
 
     def update(self, data):
         with self._lock:
+            self._id           = int(data['id'])
             self._alive        = eval('HostAlive.%s' % data['alive'])
             self._age          = int(data['age'])
             self._capabilities = data['capabilities']

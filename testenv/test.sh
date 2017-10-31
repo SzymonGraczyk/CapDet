@@ -44,4 +44,4 @@ else
 fi
 
 echo "Start agent"
-/home/vagrant/CapDet/agent.py &
+/home/vagrant/CapDet/agent.py -vv &

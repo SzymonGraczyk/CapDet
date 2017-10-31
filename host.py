@@ -36,6 +36,7 @@ class Host(object):
 
     def copy(self, host):
         with self._lock:
+            self._id           = host.get_id()
             self._alive        = host.get_alive()
             self._age          = host.get_age()
             self._capabilities = host.get_capabilities()
@@ -186,6 +187,7 @@ class Host(object):
 
     def update(self, data):
         with self._lock:
+            self._id           = int(data['id'])
             self._state        = eval('FSMStates.%s' % data['state'])
             self._alive        = eval('HostAlive.%s' % data['alive'])
             self._age          = int(data['age'])

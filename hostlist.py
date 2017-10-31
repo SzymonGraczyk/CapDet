@@ -46,9 +46,8 @@ class HostList(list):
     def get_by_hostname(self, name):
 #        with self.lock:
             for host in self:
-                caps = host.get_capabilities()
-                if 'hostname' in caps and \
-                   caps['hostname'] == name:
+                hostname = host.get_capabilities('hostname')
+                if hostname == name:
                     return host
 
             return None
