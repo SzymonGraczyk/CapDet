@@ -178,6 +178,7 @@ class Agent(CThread):
         self.send_capabilities()
 
         channel, _ = self.channels[1]
+        channel.basic_qos(prefetch_count=1)
         channel.start_consuming()
 
     def stop(self):
