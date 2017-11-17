@@ -101,7 +101,7 @@ class HostFSM(object):
             self._state = FSMStates.AF_IDLE
             accept = True
         elif event == FSMEvents.AE_CLAIM:
-            self._state = FSMStates.AF_down
+            self._state = FSMStates.AF_DOWN
             accept = False
         elif event == FSMEvents.AE_RECLAIM:
             self._state = FSMStates.AF_DOWN
@@ -127,7 +127,7 @@ class HostFSM(object):
         accept = False
 
         if event == FSMEvents.AE_WAKE:
-            self._state = FSMStates.AF_WAKE
+            self._state = FSMStates.AF_IDLE
             accept = False
         elif event == FSMEvents.AE_CLAIM:
             assert not data is None
@@ -166,7 +166,7 @@ class HostFSM(object):
         accept = False
 
         if event == FSMEvents.AE_WAKE:
-            self._state = FSMStates.AF_WAKE
+            self._state = FSMStates.AF_CLAIMED
             accept = False
         elif event == FSMEvents.AE_CLAIM:
             log.warning('Cannot claim host in claimed state')
@@ -218,7 +218,7 @@ class HostFSM(object):
 
     def _process_testing_state(self, event, data):
         if event == FSMEvents.AE_WAKE:
-            self._state = FSMStates.AF_WAKE
+            self._state = FSMStates.AF_TESTING
             accept = False
         elif event == FSMEvents.AE_CLAIM:
             self._state = FSMStates.AF_TESTING
