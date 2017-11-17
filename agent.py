@@ -57,6 +57,7 @@ class Agent(CThread):
 
         result = channel1.queue_declare(exclusive=False)
         callback_queue = result.method.queue
+        print callback_queue
 
         channel1.basic_consume(self.on_response1,
                                no_ack=True,
@@ -75,8 +76,9 @@ class Agent(CThread):
                             queue       = callback_queue,
                             routing_key = '1')
 
+        channel2.basic_qos(prefetch_count=1)
         self.consumer_tag = channel2.basic_consume(self.on_response2,
-                                                   no_ack=False,
+#                                                   no_ack=False,
                                                    queue=callback_queue)
 
         self.channels[2] = (channel2, callback_queue)
@@ -178,7 +180,6 @@ class Agent(CThread):
         self.send_capabilities()
 
         channel, _ = self.channels[2]
-        channel.basic_qos(prefetch_count=1)
         channel.start_consuming()
 
     def stop(self):
@@ -188,8 +189,12 @@ class Agent(CThread):
 
     def close_cb(self):
         ch, _ = self.channels[1]
+        ch.close()
+
+        ch, _ = self.channels[2]
         ch.stop_consuming(self.consumer_tag)
         ch.close()
+
         self.connection.close()
         
 def main():
