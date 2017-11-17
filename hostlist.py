@@ -86,7 +86,17 @@ class HostList(list):
     def from_json(data):
         hostlist = HostList()
         for l in data:
-            host = hostlist.create_host()
-            host.update(eval(l))
+#            host = hostlist.create_host()
+            host = Host()
+
+            d = eval(l)
+            host.update(d)
+
+            if 'id' in d:
+                host._id = int(d['id'])
+            else:
+                log.warning('No host ID in data')
+
+            hostlist.append(host)
 
         return hostlist

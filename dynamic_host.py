@@ -25,7 +25,7 @@ class DynamicHost(Host):
 
     def copy(self, host):
         with self._lock:
-#            self._id                                = host.get_id()
+            self._id                                = host.get_id()
             self._alive                             = host.get_alive()
             self._age                               = host.get_age()
             self._capabilities                      = host.get_capabilities()
@@ -46,10 +46,11 @@ class DynamicHost(Host):
     def execute_test(self):
         test_script = self._test_queue.get()
 
-        ip = self.get_capabilities('ip')
-        if not ip:
+        if not 'ip' in self._capabilities:
             log.error("Host does not have IP... won't execute test")
             return
+
+        ip = self._capabilities['ip']
 
         execute_test(ip, test_script)
         
