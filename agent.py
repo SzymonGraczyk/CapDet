@@ -47,7 +47,7 @@ class Agent(CThread):
 #        self._heartbeat = PeriodicCallback(self.send_heartbeat, 5000, IOLoop.current())
 
 #        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host='10.91.53.209'))
-        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=address, heartbeat_interval=10))
+        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=address))
 
         self.channels = {}
         channel1 = self.connection.channel(channel_number=1)
@@ -64,7 +64,7 @@ class Agent(CThread):
                                queue=callback_queue)
         self.channels[1] = (channel1, callback_queue)
 
-        channel2 = self.connection.channel(channel_number=2)
+        channel2 = self.connection.channel()
 
         channel2.exchange_declare(exchange      = 'tests',
                                   exchange_type = 'direct')
