@@ -1,4 +1,5 @@
 import shutil
+import sys
 import os
 
 from git import Repo, GitCommandError
@@ -44,6 +45,9 @@ class GitOps(object):
         except GitCommandError as e:
             log.error("Exception occurred in git clone: %s" % e)
             return
+        except:
+            log.error("Unexpected error: %s" % sys.exc_info()[0])
+            raise
 
     @staticmethod
     def _get_project_name(path):
