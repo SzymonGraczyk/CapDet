@@ -7,15 +7,12 @@ def execute_test(host_ip, test_script):
 
     connection = pika.BlockingConnection(pika.ConnectionParameters(host=host_ip))
 
-    channel = connection.channel(channel_number=2)
+    channel = connection.channel()
     channel.exchange_declare(exchange      = 'tests',
                              exchange_type = 'direct')
 
-#    callback_queue = 'tests_queue'
     res = channel.queue_declare(exclusive=False)
-    callback_queue = result.method.queue
-
-    print res
+    callback_queue = res.method.queue
 
     corr_id = str(uuid.uuid4())
     channel.basic_publish(exchange='tests',
@@ -28,5 +25,3 @@ def execute_test(host_ip, test_script):
                           body=str(body))
 
     connection.close()
-
-    print 'execute_test done'

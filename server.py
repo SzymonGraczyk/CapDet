@@ -40,9 +40,9 @@ class Server(object):
 #        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host='192.168.0.132'))
 #        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host='localhost', heartbeat_interval=10))
 
-        self.channel = self.connection.channel(channel_number=1)
+        self.channel = self.connection.channel()
 
-#        self.channel.exchange_delete(exchange = 'messagles')
+#        self.channel.exchange_delete(exchange = 'messages')
         self.channel.exchange_declare(exchange      = 'messages',
                                       exchange_type = 'direct')
 
@@ -200,6 +200,7 @@ class Server(object):
         log.msg('Execution done received')
 
         hostname = body
+        print body
 
         self.config.execution_done(hostname)
 

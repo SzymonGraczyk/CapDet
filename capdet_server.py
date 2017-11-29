@@ -71,13 +71,13 @@ def main():
 
     processes = []
 
-    p = Process(target=start_server, args=(['10', '12', '14'], config))
+    p = Process(target=start_server, args=(['4', '10', '12', '14'], config))
     processes.append(p)
 
     p = Process(target=start_server, args=(['4', '5', '11', '14'], config))
     processes.append(p)
 
-    p = Process(target=start_server, args=(['12', '14'], config))
+    p = Process(target=start_server, args=(['4', '12', '14'], config))
     processes.append(p)
 
     try:

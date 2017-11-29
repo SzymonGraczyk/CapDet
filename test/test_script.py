@@ -2,6 +2,7 @@ import ConfigParser
 import importlib
 import shutil
 import json
+import sys
 import os
 
 from test.git_ops import GitOps
@@ -138,8 +139,15 @@ class TestScript(dict):
                 return
 
             log.msg("Cloning git repo '%s' to '%s'..." % (product_url, product_path))
-            GitOps.clone(product_url, product_path)
-            log.msg("Cloning git repo '%s' to '%s'... done" % (product_url, product_path))
+            try:
+                GitOps.clone(product_url, product_path)
+            except Exception as e:
+                log.error("Exception occurred while cloning repo: '%s'" % e)
+            except:
+                log.error("Unexpected error: %s" % sys.exc_info()[0])
+                raise
+            else:
+                log.msg("Cloning git repo '%s' to '%s'... done" % (product_url, product_path))
 
     def remove_products(self):
         if not self.exec_dir:
@@ -164,8 +172,11 @@ class TestScript(dict):
             except Exception as e:
                 log.error("Error occcurred while removing product '%s': %s" % (product_path, e))
                 continue
-
-            log.msg("Removing product path: '%s'... done" % product_path)
+            except:
+                log.error("Unexpected error: %s" % sys.exc_info()[0])
+                raise
+            else:
+                log.msg("Removing product path: '%s'... done" % product_path)
 
     def install_products(self):
         if not self.exec_dir:
