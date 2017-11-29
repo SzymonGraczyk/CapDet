@@ -156,7 +156,7 @@ class Agent(CThread):
             return
 
         msg = MsgExecuteDone(hostname)
-        self.send(1, msg)
+        self.send(0, msg)
 
     def send(self, conn, msg):
         key  = str(msg[0])
@@ -190,7 +190,7 @@ class Agent(CThread):
 
     def call(self, n):
         msg = MsgHeartbeat()
-        return self.send(1, msg)
+        return self.send(0, msg)
 
     def send_capabilities(self):
         msg = MsgHostCapabilities(self.host)
