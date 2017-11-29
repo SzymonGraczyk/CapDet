@@ -108,12 +108,10 @@ class Agent(CThread):
         log.info('Stopping agent gracefully..done')
 
     def on_response1(self, ch, method, props, body):
-        print 'response1', ch
         if self.corr_id == props.correlation_id:
             self.response = body
 
     def on_response2(self, ch, method, props, body):
-        print 'response2', ch
         ch.basic_ack(delivery_tag = method.delivery_tag)
         log.msg('Received test script')
 
@@ -155,8 +153,10 @@ class Agent(CThread):
             log.error("Unknown hostname... shouldn't happen")
             return
 
+        log.msg('Send execution done message...')
         msg = MsgExecuteDone(hostname)
         self.send(0, msg)
+        log.msg('Send execution done message...done')
 
     def send(self, conn, msg):
         key  = str(msg[0])
