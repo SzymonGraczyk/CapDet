@@ -29,6 +29,8 @@ log    = CapDetLogger()
 class Agent(CThread):
     host = None
 
+    connections = []
+
     def __init__(self):
         super(Agent, self).__init__()
 
@@ -41,47 +43,64 @@ class Agent(CThread):
         self.host.set_alive(HostAlive.HA_ALIVE)
         self.host.set_capabilities(capabilities)
 
+        self._init_server_connection()
+        self._init_agent_connection()
+
+    def _init_server_connection(self):
         address = config['server']['address']
         log.info("Connecting to server: %s" % address)
 
-#        self._heartbeat = PeriodicCallback(self.send_heartbeat, 5000, IOLoop.current())
+        server_conn = {}
 
-#        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host='10.91.53.209'))
-        self.connection = pika.BlockingConnection(pika.ConnectionParameters(host=address))
+        connection = pika.BlockingConnection(pika.ConnectionParameters(host=address))
+        server_conn['connection'] = connection
 
-        self.channels = {}
-        channel1 = self.connection.channel(channel_number=1)
+        channel = connection.channel()
 
-        channel1.exchange_declare(exchange      = 'messages',
-                                  exchange_type = 'direct')
+        channel.exchange_declare(exchange      = 'messages',
+                                 exchange_type = 'direct')
 
-        result = channel1.queue_declare(exclusive=False)
-        callback_queue = result.method.queue
-        print callback_queue
+        result = channel.queue_declare(exclusive=False)
+        server_conn['queue'] = result.method.queue
 
-        channel1.basic_consume(self.on_response1,
-                               no_ack=True,
-                               queue=callback_queue)
-        self.channels[1] = (channel1, callback_queue)
+        channel.basic_consume(self.on_response1,
+                              no_ack=True,
+                              queue=server_conn['queue'])
 
-        channel2 = self.connection.channel()
+        server_conn['channel'] = channel
 
-        channel2.exchange_declare(exchange      = 'tests',
-                                  exchange_type = 'direct')
+        self.connections.append(server_conn)
+
+    def _init_agent_connection(self):
+        address = config['agent']['address']
+        log.info("Creating agent connection: %s" % address)
+
+        agent_conn = {}
+
+        connection = pika.BlockingConnection(pika.ConnectionParameters(host=address))
+        agent_conn['connection'] = connection
+
+        channel = connection.channel()
+
+        channel.exchange_declare(exchange      = 'tests',
+                                 exchange_type = 'direct')
         
-        callback_queue = 'tests_queue'
-        result = channel2.queue_declare(queue=callback_queue, exclusive=False)
+        agent_conn['queue'] = 'tests_queue'
+        result = channel.queue_declare(queue     = agent_conn['queue'],
+                                       exclusive = False)
 
-        channel2.queue_bind(exchange    = 'tests',
-                            queue       = callback_queue,
-                            routing_key = '1')
+        channel.queue_bind(exchange    = 'tests',
+                           queue       = agent_conn['queue'],
+                           routing_key = '1')
 
-        channel2.basic_qos(prefetch_count=1)
-        self.consumer_tag = channel2.basic_consume(self.on_response2,
-#                                                   no_ack=False,
-                                                   queue=callback_queue)
+        channel.basic_qos(prefetch_count=1)
+        agent_conn['consumer_tag'] = channel.basic_consume(self.on_response2,
+#                                                           no_ack=False,
+                                                           queue=agent_conn['queue'])
 
-        self.channels[2] = (channel2, callback_queue)
+        agent_conn['channel'] = channel
+
+        self.connections.append(agent_conn)
 
     def exit_gracefully(self, signum, frame):
         log.info('Stopping agent gracefully..')
@@ -89,10 +108,12 @@ class Agent(CThread):
         log.info('Stopping agent gracefully..done')
 
     def on_response1(self, ch, method, props, body):
+        print 'response1', ch
         if self.corr_id == props.correlation_id:
             self.response = body
 
     def on_response2(self, ch, method, props, body):
+        print 'response2', ch
         ch.basic_ack(delivery_tag = method.delivery_tag)
         log.msg('Received test script')
 
@@ -137,11 +158,12 @@ class Agent(CThread):
         msg = MsgExecuteDone(hostname)
         self.send(1, msg)
 
-    def send(self, ch, msg):
+    def send(self, conn, msg):
         key  = str(msg[0])
         data = msg[1]
 
-        channel, queue = self.channels[ch]
+        channel = self.connections[conn]['channel']
+        queue   = self.connections[conn]['queue']
 
         self.response = None
         self.corr_id = str(uuid.uuid4())
@@ -173,29 +195,33 @@ class Agent(CThread):
     def send_capabilities(self):
         msg = MsgHostCapabilities(self.host)
 
-        self.send(1, msg)
+        self.send(0, msg)
         log.msg('Capabilities sent to server')
 
     def run(self):
         self.send_capabilities()
 
-        channel, _ = self.channels[2]
+        channel = self.connections[1]['channel']
         channel.start_consuming()
 
     def stop(self):
-        self.connection.add_timeout(1, self.close_cb)
+        self.connections[0].add_timeout(1, self.close_server_conn_cb)
+        self.connections[1].add_timeout(1, self.close_agent_conn_cb)
 
         super(Agent, self).stop()
 
-    def close_cb(self):
-        ch, _ = self.channels[1]
-        ch.close()
+    def close_server_conn_cb(self):
+        channel = self.connections[0]['channel']
+        channel.close()
 
-        ch, _ = self.channels[2]
-        ch.stop_consuming(self.consumer_tag)
-        ch.close()
+        self.connections[0].close()
 
-        self.connection.close()
+    def close_agent_conn_cb(self):
+        channel = self.connections[1]['channel']
+        channel.stop_consuming(self.connections[1]['consumer_tag'])
+        channel.close()
+
+        self.connections[1].close()
         
 def main():
     parser = argparse.ArgumentParser(prog='agent')
