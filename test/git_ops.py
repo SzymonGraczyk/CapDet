@@ -40,8 +40,6 @@ class GitOps(object):
                 res = Repo.clone_from(url, dst)
             else:
                 res = Repo.clone_from(url, dst, branch=branch)
-
-            print res
         except GitCommandError as e:
             log.error("Exception occurred in git clone: %s" % e)
             return

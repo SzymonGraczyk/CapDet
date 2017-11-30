@@ -205,8 +205,8 @@ class Agent(CThread):
         channel.start_consuming()
 
     def stop(self):
-        self.connections[0].add_timeout(1, self.close_server_conn_cb)
-        self.connections[1].add_timeout(1, self.close_agent_conn_cb)
+        self.connections[0]['connection'].add_timeout(1, self.close_server_conn_cb)
+        self.connections[1]['connection'].add_timeout(1, self.close_agent_conn_cb)
 
         super(Agent, self).stop()
 
