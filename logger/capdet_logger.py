@@ -11,6 +11,8 @@ class CapDetLogger(MessageLogger):
         self._loggers |= set(loggers)
 
     def remove_logger(self, *loggers):
+        print loggers
+        print self._loggers
         self._loggers -= set(loggers)
 
     def list_loggers(self):
