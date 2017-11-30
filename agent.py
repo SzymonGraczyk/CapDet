@@ -137,8 +137,8 @@ class Agent(CThread):
 
             log.remove_logger(install_log)
 
-        import time
-        time.sleep(10)
+#        import time
+#        time.sleep(10)
 
         remove_products_log_path = os.path.join(test_script.get_execution_dir(), 'remove_products.log')
         remove_products_log = LoggerFile(remove_products_log_path, 2)
