@@ -4,6 +4,7 @@ import argparse
 import signal
 import pika
 import uuid
+import sys
 import os
 
 from event_dispatcher import EventDispatcher
@@ -21,7 +22,7 @@ from host_state import HostState, HostAlive
 
 from msg import MsgHostCapabilities, MsgHeartbeat, MsgSetState, MsgGetState, MsgExecuteDone
 
-from test.test_script import TestScript
+from test.test_script import TestScript, NoExecutionDir
 
 config = CapDetConfig()
 log    = CapDetLogger()
@@ -133,12 +134,19 @@ class Agent(CThread):
             install_log = LoggerFile(install_log_path, 2)
             log.add_logger(install_log)
 
-            test_script.install_products()
+            try:
+                test_script.install_products()
+            except NoExecutionDir:
+                log.error('No execution dir. Should not happen')
+                return
+            except:
+                log.error("Unexpected error: %s" % sys.exc_info()[0])
+                raise
 
             log.remove_logger(install_log)
 
-#        import time
-#        time.sleep(10)
+        import time
+        time.sleep(2)
 
         remove_products_log_path = os.path.join(test_script.get_execution_dir(), 'remove_products.log')
         remove_products_log = LoggerFile(remove_products_log_path, 2)
