@@ -144,7 +144,8 @@ class TestScript(dict):
             except Exception as e:
                 log.error("Exception occurred while cloning repo: '%s'" % e)
             except:
-                log.error("Unexpected error: %s" % sys.exc_info()[0])
+                info = sys.exc_info()[0]
+                log.error("Unexpected error: %s" % info)
                 raise
             else:
                 log.msg("Cloning git repo '%s' to '%s'... done" % (product_url, product_path))
@@ -173,7 +174,8 @@ class TestScript(dict):
                 log.error("Error occcurred while removing product '%s': %s" % (product_path, e))
                 continue
             except:
-                log.error("Unexpected error: %s" % sys.exc_info()[0])
+                info = sys.exc_info()[0]
+                log.error("Unexpected error: %s" % info)
                 raise
             else:
                 log.msg("Removing product path: '%s'... done" % product_path)
