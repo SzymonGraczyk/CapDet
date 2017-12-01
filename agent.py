@@ -127,15 +127,17 @@ class Agent(CThread):
         if res:
             get_products_log_path = os.path.join(test_script.get_execution_dir(), 'get_products.log')
             get_products_log = LoggerFile(get_products_log_path, 2)
-            log.add_logger(get_products_log)
+            loggers = [get_products_log]
+            log.add_logger(*loggers)
 
             test_script.get_products()
 
-            log.remove_logger(get_products_log)
+            log.remove_logger(*loggers)
 
             install_log_path = os.path.join(test_script.get_execution_dir(), 'install.log')
             install_log = LoggerFile(install_log_path, 2)
-            log.add_logger(install_log)
+            loggers = [install_log]
+            log.add_logger(*loggers)
 
             try:
                 test_script.install_products()
@@ -146,18 +148,19 @@ class Agent(CThread):
                 log.error("Unexpected error: %s" % sys.exc_info()[0])
                 raise
 
-            log.remove_logger(install_log)
+            log.remove_logger(*loggers)
 
         import time
         time.sleep(2)
 
         remove_products_log_path = os.path.join(test_script.get_execution_dir(), 'remove_products.log')
         remove_products_log = LoggerFile(remove_products_log_path, 2)
-        log.add_logger(remove_products_log)
+        loggers = [remove_products_log]
+        log.add_logger(*loggers)
 
         test_script.remove_products()
 
-        log.remove_logger(remove_products_log)
+        log.remove_logger(*loggers)
 
         hostname = self.host.get_capabilities('hostname')
         if not hostname:
