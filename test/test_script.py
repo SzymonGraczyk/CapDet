@@ -144,7 +144,8 @@ class TestScript(dict):
             except Exception as e:
                 log.error("Exception occurred while cloning repo: '%s'" % e)
             except:
-                info = sys.exc_info()[0]
+#                info = sys.exc_info()[0]
+                info = 'test'
                 log.error("Unexpected error: %s" % info)
                 raise
             else:
@@ -174,7 +175,8 @@ class TestScript(dict):
                 log.error("Error occcurred while removing product '%s': %s" % (product_path, e))
                 continue
             except:
-                info = sys.exc_info()[0]
+#                info = sys.exc_info()[0]
+                info = 'test'
                 log.error("Unexpected error: %s" % info)
                 raise
             else:
