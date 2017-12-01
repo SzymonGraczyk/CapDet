@@ -2,10 +2,13 @@
 
 import argparse
 import signal
+import time
 import pika
 import uuid
 import sys
 import os
+
+from pika.exceptions import ConnectionClosed
 
 from event_dispatcher import EventDispatcher
 from cthread import CThread
@@ -30,7 +33,7 @@ log    = CapDetLogger()
 class Agent(CThread):
     host = None
 
-    connections = []
+    connections = {}
 
     def __init__(self):
         super(Agent, self).__init__()
@@ -44,8 +47,8 @@ class Agent(CThread):
         self.host.set_alive(HostAlive.HA_ALIVE)
         self.host.set_capabilities(capabilities)
 
-        self._init_server_connection()
-        self._init_agent_connection()
+        self.connections['server'] = self._init_server_connection()
+        self.connections['agent']  = self._init_agent_connection()
 
     def _init_server_connection(self):
         address = config['server']['address']
@@ -70,7 +73,7 @@ class Agent(CThread):
 
         server_conn['channel'] = channel
 
-        self.connections.append(server_conn)
+        return server_conn
 
     def _init_agent_connection(self):
         address = config['agent']['address']
@@ -101,7 +104,7 @@ class Agent(CThread):
 
         agent_conn['channel'] = channel
 
-        self.connections.append(agent_conn)
+        return agent_conn
 
     def exit_gracefully(self, signum, frame):
         log.info('Stopping agent gracefully..')
@@ -163,7 +166,7 @@ class Agent(CThread):
 
         log.msg('Send execution done message...')
         msg = MsgExecuteDone(hostname)
-        self.send(0, msg)
+        self.send('server', msg)
         log.msg('Send execution done message...done')
 
     def send(self, conn, msg):
@@ -198,38 +201,51 @@ class Agent(CThread):
 
     def call(self, n):
         msg = MsgHeartbeat()
-        return self.send(0, msg)
+        return self.send('server', msg)
 
     def send_capabilities(self):
         msg = MsgHostCapabilities(self.host)
 
-        self.send(0, msg)
+        self.send('server', msg)
         log.msg('Capabilities sent to server')
 
     def run(self):
-        self.send_capabilities()
+        _run = True
+        while _run:
+            self.send_capabilities()
 
-        channel = self.connections[1]['channel']
-        channel.start_consuming()
+            channel = self.connections['agent']['channel']
+
+            try:
+                channel.start_consuming()
+            except ConnectionClosed as e:
+                log.info('Agent connection closed: %s' % e)
+                
+                log.info('Try to reconnect...')
+                time.sleep(5)
+                self.connections['server'] = self._init_server_connection()
+                self.connections['agent']  = self._init_agent_connection()
+            else:
+                _run = False
 
     def stop(self):
-        self.connections[0]['connection'].add_timeout(1, self.close_server_conn_cb)
-        self.connections[1]['connection'].add_timeout(1, self.close_agent_conn_cb)
+        self.connections['server']['connection'].add_timeout(1, self.close_server_conn_cb)
+        self.connections['agent']['connection'].add_timeout(1, self.close_agent_conn_cb)
 
         super(Agent, self).stop()
 
     def close_server_conn_cb(self):
-        channel = self.connections[0]['channel']
+        channel = self.connections['server']['channel']
         channel.close()
 
-        self.connections[0].close()
+        self.connections['server']['connection'].close()
 
     def close_agent_conn_cb(self):
-        channel = self.connections[1]['channel']
-        channel.stop_consuming(self.connections[1]['consumer_tag'])
+        channel = self.connections['agent']['channel']
+        channel.stop_consuming(self.connections['agent']['consumer_tag'])
         channel.close()
 
-        self.connections[1].close()
+        self.connections['agent']['connection'].close()
         
 def main():
     parser = argparse.ArgumentParser(prog='agent')

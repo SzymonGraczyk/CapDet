@@ -1,7 +1,10 @@
 import signal
 import random
+import time
 import pika
 import json
+
+from pika.exceptions import ConnectionClosed
 
 from host import Host, HostAlive
 from dynamic_host import DynamicHost
@@ -33,6 +36,9 @@ class Server(object):
         self.msg_types = msg_types
         self.config    = cfg
 
+        self._init_connection()
+
+    def _init_connection(self):
         address = config['server']['address']
         log.info("Connecting to server: %s" % address)
 
@@ -49,7 +55,7 @@ class Server(object):
         self.queue_name = 'msg_queue'
         res = self.channel.queue_declare(queue=self.queue_name, exclusive=False)
 
-        for msg_type in msg_types:
+        for msg_type in self.msg_types:
             self.channel.queue_bind(exchange    = 'messages',
                                     queue       = self.queue_name,
                                     routing_key = msg_type)
@@ -60,6 +66,9 @@ class Server(object):
         self.register_callback('11', self.reclaim_host)
         self.register_callback('12', self.schedule_test)
         self.register_callback('14', self.execution_done)
+
+        self.channel.basic_qos(prefetch_count=1)
+        self.consumer_tag = self.channel.basic_consume(self.on_request, queue=self.queue_name)
 
     def exit_gracefully(self, signum, frame):
         log.info('Stopping server gracefully..')
@@ -223,11 +232,19 @@ class Server(object):
         ch.basic_ack(delivery_tag = method.delivery_tag)
 
     def start(self):
-        self.channel.basic_qos(prefetch_count=1)
-        self.consumer_tag = self.channel.basic_consume(self.on_request, queue=self.queue_name)
+        _run = True
+        while _run:
+            try:
+                log.msg(" [x] Awaiting RPC requests (%s)" % self.msg_types)
+                self.channel.start_consuming()
+            except ConnectionClosed as e:
+                log.info('Server connection closed: %s' % e)
 
-        log.msg(" [x] Awaiting RPC requests (%s)" % self.msg_types)
-        self.channel.start_consuming()
+                log.info('Try to reconnect...')
+                time.sleep(5)
+                self._init_connection()
+            else:
+                _run = False
 
     def stop(self):
         for msg_type in self.msg_types:
